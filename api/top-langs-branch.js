@@ -1,8 +1,11 @@
 // api/top-langs-branch.js
-import fetch from "node-fetch";
+// 최소 의존 & 확실한 경로 & 전역 fetch 사용
+
 import languageMap from "language-map";
-import { renderTopLanguages } from "../src/cards/top-languages-card";
-import { clampValue } from "../src/utils/utils";
+// ✅ github-readme-stats 내부 카드 유틸의 정확한 경로/이름
+import { renderTopLanguages } from "../src/cards/top-langs-card.js";
+// 유틸 경로도 정확히 맞춰주세요
+import { clampValue } from "../src/utils/utils.js";
 
 const GITHUB_API = "https://api.github.com";
 
@@ -10,7 +13,6 @@ function toArray(q) {
   if (!q) return [];
   return q.split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
 }
-
 function toBool(q, def = false) {
   if (q == null) return def;
   return ["1", "true", "yes", "y", "on"].includes(String(q).toLowerCase());
@@ -22,9 +24,7 @@ function extToLanguage(filename) {
   const ext = filename.slice(idx + 1).toLowerCase();
   for (const [lang, meta] of Object.entries(languageMap)) {
     const exts = meta.extensions || [];
-    if (exts.some(e => e.replace(/^\./, "") === ext)) {
-      return lang;
-    }
+    if (exts.some(e => e.replace(/^\./, "") === ext)) return lang;
   }
   return null;
 }
@@ -40,7 +40,7 @@ async function fetchAllUserRepos(token, user, includeForks, includeArchived, per
   while (page <= maxPages) {
     const url = `${GITHUB_API}/users/${encodeURIComponent(user)}/repos?per_page=${perPage}&page=${page}&type=owner&sort=updated`;
     const r = await fetch(url, { headers });
-    if (!r.ok) throw new Error(`Failed to list repos for ${user}: ${r.status}`);
+    if (!r.ok) throw new Error(`List repos failed for ${user}: ${r.status} ${await r.text()}`);
     const js = await r.json();
     if (!Array.isArray(js) || js.length === 0) break;
     acc.push(
@@ -62,19 +62,22 @@ async function fetchRepoTreeByBranch(token, owner, repo, branch) {
     Accept: "application/vnd.github+json",
   };
 
+  // 1) branch -> commit sha
   const bRes = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}`, { headers });
   if (!bRes.ok) {
+    // 브랜치 없으면 스킵
     if (bRes.status === 404) return [];
-    throw new Error(`Branch lookup failed ${owner}/${repo}#${branch}: ${bRes.status}`);
+    throw new Error(`Branch lookup failed ${owner}/${repo}#${branch}: ${bRes.status} ${await bRes.text()}`);
   }
   const bJson = await bRes.json();
   const sha = bJson?.commit?.sha;
   if (!sha) return [];
 
+  // 2) recursive tree
   const tRes = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`, { headers });
   if (!tRes.ok) {
-    if (tRes.status === 409) return [];
-    throw new Error(`Tree fetch failed ${owner}/${repo}@${sha}: ${tRes.status}`);
+    if (tRes.status === 409) return []; // empty repo
+    throw new Error(`Tree fetch failed ${owner}/${repo}@${sha}: ${tRes.status} ${await tRes.text()}`);
   }
   const tJson = await tRes.json();
   return tJson?.tree || [];
@@ -84,6 +87,7 @@ function aggregateByLanguageFromTree(tree) {
   const totals = {};
   for (const item of tree) {
     if (item.type !== "blob") continue;
+    // 일부 케이스에 size가 없을 수 있음 → 그런 파일은 스킵
     if (typeof item.size !== "number") continue;
     const lang = extToLanguage(item.path);
     if (!lang) continue;
@@ -130,11 +134,17 @@ export default async function handler(req, res) {
       locale,
       custom_title,
       max_repos = "60",
+      debug,
     } = req.query;
 
     const token = process.env.PAT_1;
     if (!token) {
       res.status(500).send("PAT_1 env not set");
+      return;
+    }
+
+    if (!user) {
+      res.status(400).send("Provide ?user=username");
       return;
     }
 
@@ -144,14 +154,9 @@ export default async function handler(req, res) {
     const allowArchived = toBool(include_archived, false);
     const maxRepos = clampValue(parseInt(max_repos, 10) || 60, 1, 300);
 
-    let repoFullNames = [];
-    if (!user) {
-      res.status(400).send("Provide ?user=username");
-      return;
-    }
-
+    // 1) 대상 레포 목록
     const listed = await fetchAllUserRepos(token, user, allowForks, allowArchived);
-    repoFullNames = listed
+    const repoFullNames = listed
       .map(r => r.full_name)
       .filter(full => {
         const name = full.split("/")[1]?.toLowerCase() || "";
@@ -164,41 +169,48 @@ export default async function handler(req, res) {
       return;
     }
 
+    // 2) 언어 합산
     const totals = await aggregateRepos(token, repoFullNames, branch);
     for (const k of Object.keys(totals)) {
       if (hideList.has(k.toLowerCase())) delete totals[k];
     }
 
+    // 3) 상위 N
     const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
     const topN = clampValue(parseInt(langs_count, 10) || 6, 1, 20);
     const top = sorted.slice(0, topN);
+    const items = top.map(([name, size]) => ({ name, size }));
 
-    const totalBytes = top.reduce((acc, [, v]) => acc + v, 0);
-    const items = top.map(([name, size]) => ({ name, size, percent: totalBytes ? (size / totalBytes) * 100 : 0 }));
+    // 4) 카드 렌더 (기존 컴포넌트 재사용)
+    const svg = renderTopLanguages(items, {
+      hide_title: toBool(hide_title, false),
+      card_width: card_width ? Number(card_width) : undefined,
+      layout,
+      langs_count: topN,
+      theme,
+      bg_color,
+      title_color,
+      text_color,
+      icon_color,
+      border_color,
+      hide_border: toBool(hide_border, false),
+      locale,
+      custom_title: custom_title || `Top Languages (${branch})`,
+    });
 
-    const svg = renderTopLanguages(
-      items.map(i => ({ name: i.name, size: i.size })),
-      {
-        hide_title: toBool(hide_title, false),
-        card_width: card_width ? Number(card_width) : undefined,
-        layout,
-        langs_count: topN,
-        theme,
-        bg_color,
-        title_color,
-        text_color,
-        icon_color,
-        border_color,
-        hide_border: toBool(hide_border, false),
-        locale,
-        custom_title: custom_title || `Top Languages (${branch})`,
-      }
-    );
+    // 디버그 텍스트로 확인하고 싶을 때(문제 발생 시)
+    if (toBool(debug, false)) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.status(200).send(JSON.stringify({ branch, repoCount: repoFullNames.length, repos: repoFullNames, totals }, null, 2));
+      return;
+    }
 
     res.setHeader("Content-Type", "image/svg+xml");
     res.setHeader("Cache-Control", "max-age=1800, s-maxage=1800");
     res.status(200).send(svg);
   } catch (e) {
+    // Vercel 로그에서 메시지 확인 쉽게
+    console.error("[top-langs-branch] error", e);
     res.status(500).send(`Error: ${e?.message || e}`);
   }
 }
