@@ -181,7 +181,21 @@ export default async function handler(req, res) {
     const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
     const topN = clampValue(parseInt(langs_count, 10) || 6, 1, 20);
     const top = sorted.slice(0, topN);
-    const items = top.map(([name, size]) => ({ name, size }));
+    
+    // ⭐️⭐️⭐️ 문제 해결을 위한 핵심 수정 부분: 언어 색상 정보를 추가합니다. ⭐️⭐️⭐️
+    const items = top.map(([name, size]) => {
+      // languageMap에서 해당 언어의 메타데이터를 가져옵니다.
+      const langMeta = languageMap[name];
+      // 색상 정보를 추출하거나, 정보가 없을 경우 기본 회색(#858585)을 사용합니다.
+      const color = langMeta?.color || "#858585"; 
+      
+      return { 
+        name, 
+        size, 
+        color, // color 속성을 객체에 추가
+      };
+    });
+    // ⭐️⭐️⭐️ 수정 끝 ⭐️⭐️⭐️
 
     // 4) 카드 렌더 (기존 컴포넌트 재사용)
     const svg = renderTopLanguages(items, {
@@ -203,7 +217,7 @@ export default async function handler(req, res) {
     // 디버그 텍스트로 확인하고 싶을 때(문제 발생 시)
     if (toBool(debug, false)) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.status(200).send(JSON.stringify({ branch, repoCount: repoFullNames.length, repos: repoFullNames, totals }, null, 2));
+      res.status(200).send(JSON.stringify({ branch, repoCount: repoFullNames.length, repos: repoFullNames, totals, items }, null, 2));
       return;
     }
 
