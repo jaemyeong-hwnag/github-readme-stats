@@ -151,7 +151,7 @@ export default async function handler(req, res) {
     }
 
     const exclude = new Set(toArray(exclude_repos).map(x => x.toLowerCase()));
-    const hideList = new Set(toArray(hide).map(x => x.toLowerCase()));
+    const hideList = new Set(toArray(hide).map(cleanAndLower));
     const allowForks = toBool(include_forks, false);
     const allowArchived = toBool(include_archived, false);
     const maxRepos = clampValue(parseInt(max_repos, 10) || 60, 1, 300);
@@ -174,7 +174,9 @@ export default async function handler(req, res) {
     // 2) 언어 합산
     const totals = await aggregateRepos(token, repoFullNames, branch);
     for (const k of Object.keys(totals)) {
-      if (hideList.has(k.toLowerCase())) delete totals[k];
+        if (hideList.has(cleanAndLower(k))) {
+            delete totals[k];
+        }
     }
 
     // 3) 상위 N
