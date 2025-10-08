@@ -150,6 +150,7 @@ export default async function handler(req, res) {
       return;
     }
 
+    const cleanAndLower = (s) => String(s).toLowerCase().replace(/[\s-]+/g, "");
     const exclude = new Set(toArray(exclude_repos).map(x => x.toLowerCase()));
     const hideList = new Set(toArray(hide).map(cleanAndLower));
     const allowForks = toBool(include_forks, false);
