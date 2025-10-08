@@ -1,7 +1,9 @@
 // api/top-langs-branch.js
 // 최소 의존 & 확실한 경로 & 전역 fetch 사용
 
-import languageMap from "language-map";
+// 💥 PRIMARY FIX: Added 'with { type: "json" }' to resolve ERR_IMPORT_ATTRIBUTE_MISSING
+import languageMap from "language-map/languages.json" with { type: "json" }; 
+
 // ✅ github-readme-stats 내부 카드 유틸의 정확한 경로/이름
 import { renderTopLanguages } from "../src/cards/top-languages-card.js";
 // 유틸 경로도 정확히 맞춰주세요
