@@ -5,7 +5,7 @@ import languageMap from "language-map";
 // ✅ github-readme-stats 내부 카드 유틸의 정확한 경로/이름
 import { renderTopLanguages } from "../src/cards/top-languages-card.js";
 // 유틸 경로도 정확히 맞춰주세요
-import { clampValue } from "../src/utils/utils.js";
+import { clampValue } from "../src/common/utils.js";
 
 const GITHUB_API = "https://api.github.com";
 
